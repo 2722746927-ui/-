@@ -1,0 +1,89 @@
+# 人生规划 · Life Planner AI
+
+通过三轮访谈理解个人价值观、生活诉求和现实条件，生成六章人生发展规划及可验证的近期行动。V0.1 免费体验，无账号、支付或数据库。
+
+## 当前实现
+
+- 第一轮 6 个基础问题；第二、三轮由 DeepSeek 基于全部已回答内容动态生成 1—5 个问题。
+- 分步单选、多选、自由输入，支持不知道、跳过、返回修改。修改早期回答后清除后续追问和旧报告，重新生成。
+- 服务端 JSON 输出校验、一次格式修复、超时和明确错误重试，不以模板报告冒充真实 AI 结果。
+- 六章报告，区分用户事实、合理推测与待验证信息，并可展开查看原回答依据。
+- 浏览器本地会话恢复、隐私同意、清除数据。
+- 中文 PDF 文件下载：内置 SIL OFL 的 Noto Sans SC 字体，真实文字、自动分页；同时支持浏览器打印。
+- 手机优先蓝白中文界面。
+
+## 本地运行
+
+需要 Node.js 20.9+（开发环境已使用 Node.js 24）。
+
+```bash
+npm ci
+cp .env.example .env.local
+# 在本机编辑 .env.local，填写自己的 DEEPSEEK_API_KEY
+npm run dev
+```
+
+访问 http://localhost:3000。`.env.local` 已被 Git 忽略。密钥只能放服务端，不得使用 `NEXT_PUBLIC_` 前缀，也不要把密钥写在聊天、README 或 GitHub。
+
+环境变量：
+
+| 名称 | 用途 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | 必需，DeepSeek API 密钥 |
+| `DEEPSEEK_MODEL` | 可选，默认 `deepseek-chat` |
+| `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com`，不带末尾斜杠 |
+
+未配置密钥时，首页会显示准备中，第一轮可以填写；服务端返回明确的未配置提示，不会生成虚构规划。
+
+## 构建与验证
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm start
+```
+
+可选部署适配验证：先运行 `npm run build:sites`，再运行 `npm run test:deployment`。
+
+测试涵盖界面完整三轮操作、输入草稿刷新恢复、隐私同意、AI 请求上下文、结构化输出修复、错误分支、证据引用、修改后失效、本地会话恢复和多页中文 PDF。测试使用模拟的 DeepSeek 响应；不能代替真实 API 和浏览器端到端验收。
+
+## 部署方案 A：Vercel（原生 Next.js）
+
+1. 在 Vercel 导入此 GitHub 仓库，Framework 选择 Next.js。
+2. 在项目 Settings → Environment Variables 中添加 `DEEPSEEK_API_KEY`，可选 `DEEPSEEK_MODEL`。
+3. 部署。路由 `/api/planner` 运行于服务端，`/api/health` 仅返回是否已配置，不返回密钥。
+4. 函数已声明 `maxDuration = 300`；请确认套餐允许足够的函数运行时间。每次模型请求超时为 115 秒，格式修复最多再调用一次。
+5. 发布前在平台启用访问频率与预算限制；无账号的公开 AI 服务仍可能被滥用。
+
+## 部署方案 B：Sites / Cloudflare Worker
+
+项目保留原生 Next.js 实现。`npm run build:sites` 会在忽略的 `work/` 内构建前端静态副本，再将同一个服务端规划处理器与压缩静态资源编译为 `dist/server/index.js`，不会将密钥编进静态文件。
+
+`.openai/hosting.json` 记录 Sites 项目身份；在 Sites 的服务端运行环境中将 `DEEPSEEK_API_KEY` 配置为 secret，重新部署后生效。默认部署可先私有预览；用于真实体验时按产品访问设置开放访客访问。
+
+Worker 包含基于平台 IP 的单实例尽力限流（15 分钟 15 次，最多 2 个并发）。这不是全局额度保护；公开运营仍需平台级限流、费用上限与监控。
+
+## 数据和隐私
+
+本版本不把访谈或报告写入网站数据库，也不在应用代码中打印用户回答。回答及报告仅在当前浏览器 localStorage 保存；生成追问或报告时，全部现有访谈经服务端发送给 DeepSeek，服务方和托管平台按各自政策处理数据。不要收集身份证、精确地址、联系方式等无关信息。
+
+清除本次数据只清除本机副本，无法撤回已发往模型服务的数据。共享设备、无痕模式和浏览器清理有各自风险；下载的 PDF 由用户自行保存。
+
+## 文件结构
+
+- `app/`：Next.js 页面、布局、Tailwind 样式和原生 API 路由。
+- `src/components/`：首页、访谈流程和报告界面。
+- `src/lib/prompts.ts`：访谈与报告专用系统提示词。
+- `src/lib/schema.ts`：请求、问题、报告、会话结构校验。
+- `src/lib/server.ts`：DeepSeek 调用、输出修复、证据校验、错误处理。
+- `src/lib/session.ts`：本机状态恢复与回答修改失效逻辑。
+- `src/lib/pdf.ts`：中文字体嵌入与分页导出。
+- `scripts/`：可选 Sites 构建适配器。
+- `tests/`：核心流程与 PDF 自动化测试。
+
+## 已知边界
+
+AI 事实真实性仍需要人类审阅，编号校验不等同于验证自然语言结论。模型可能偶尔重复语义相近的问题；当前拦截完全重复的问题及错误结构。V0.1 没有跨设备恢复、账号、历史报告或后台。浏览器语音输入暂未开发，所有问题都保留文字输入。报告不提供心理诊断，不承诺就业、收入或升学结果。
+
+PDF 支持字体覆盖内的中文、拉丁字母和常用符号；不支持的表情或罕见字符会替换为问号，网页保留原文。字体来源与许可见 `public/fonts/OFL.txt`；Noto Sans SC 为 SIL Open Font License 1.1。
