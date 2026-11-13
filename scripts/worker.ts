@@ -22,6 +22,10 @@ export default {
  }
 };
 function serve(asset:{body:string;type:string},request:Request,status:number,immutable=false){
- const headers={'Content-Type':asset.type,'Content-Encoding':'gzip','Cache-Control':immutable?'public, max-age=31536000, immutable':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','Permissions-Policy':'camera=(), microphone=(), geolocation=()','X-Frame-Options':'SAMEORIGIN'};
- const bytes=Uint8Array.from(atob(asset.body),c=>c.charCodeAt(0));return new Response(request.method==='HEAD'?null:bytes,{status,headers});
+ const headers={'Content-Type':asset.type,'Cache-Control':immutable?'public, max-age=31536000, immutable':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','Permissions-Policy':'camera=(), microphone=(), geolocation=()','X-Frame-Options':'SAMEORIGIN'};
+ const binary=atob(asset.body);const bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+ // The runtime handles HTTP compression. Decode embedded assets first to avoid
+ // double-encoding the response at the Cloudflare boundary.
+ const body=request.method==='HEAD'?null:new Response(bytes).body!.pipeThrough(new DecompressionStream('gzip'));
+ return new Response(body,{status,headers});
 }
