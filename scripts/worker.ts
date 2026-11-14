@@ -1,13 +1,11 @@
 /** Sites deployment adapter. Native Next.js API routes use the same handler. */
-import { connectivityProbe } from '../src/lib/connectivity-probe';
 import { handlePlanner } from '../src/lib/server';
 import { handleKeySettings,resolvePlannerConfig,type SettingsEnv } from '../src/lib/key-settings';
 declare const SITE_ASSETS:Record<string,{body:string;type:string}>;
 const buckets=new Map<string,{count:number;reset:number;active:number}>();
 export default {
- async fetch(request:Request,env:SettingsEnv&{PLANNER_DIAGNOSTIC_TOKEN?:string}):Promise<Response>{
+ async fetch(request:Request,env:SettingsEnv):Promise<Response>{
   const url=new URL(request.url);
-  if(url.pathname==='/api/internal/connectivity')return connectivityProbe(request,env.PLANNER_DIAGNOSTIC_TOKEN);
   if(url.pathname==='/api/admin/deepseek')return handleKeySettings(request,env);
   if(url.pathname==='/api/health'){try{const config=await resolvePlannerConfig(env);return Response.json({configured:Boolean(config.DEEPSEEK_API_KEY)},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({configured:false},{status:503,headers:{'Cache-Control':'no-store'}});}}
   if(url.pathname==='/api/planner'){
