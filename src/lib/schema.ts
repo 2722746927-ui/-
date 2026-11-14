@@ -21,7 +21,7 @@ export const roundSchema = z.object({
   const answered=new Set<string>();
   for(const a of r.answers){if(!ids.includes(a.questionId)||answered.has(a.questionId)) ctx.addIssue({code:'custom',message:'回答与问题不匹配'}); answered.add(a.questionId);}
 });
-export const interviewSchema = z.object({ rounds: z.array(roundSchema).min(1).max(3) }).superRefine((v,ctx)=>{
+export const interviewSchema = z.object({ rounds: z.array(roundSchema).min(1).max(3),previousRounds:z.array(roundSchema).max(3).optional() }).superRefine((v,ctx)=>{
   v.rounds.forEach((r,i)=>{if(r.round!==i+1)ctx.addIssue({code:'custom',message:'访谈轮次必须连续'});});
 });
 export type Question = z.infer<typeof questionSchema>;
@@ -68,5 +68,5 @@ export type Report=z.infer<typeof reportSchema>;
 export type LegacyReport=z.infer<typeof legacyReportSchema>;
 export type SavedReport=z.infer<typeof savedReportSchema>;
 export const requestSchema=z.object({action:z.enum(['followup','report']),interview:interviewSchema});
-export const savedSchema=z.object({version:z.literal(1),workflowVersion:z.literal(2).optional(),previousRounds:z.array(roundSchema).max(3).optional(),rounds:z.array(roundSchema).min(1).max(3),cursor:z.number().int().min(0).max(6),roundIndex:z.number().int().min(0).max(2),consent:z.boolean(),screen:z.enum(['home','interview','report']),report:savedReportSchema.nullable(),updatedAt:z.string()});
+export const savedSchema=z.object({version:z.literal(1),workflowVersion:z.literal(2).optional(),previousRounds:z.array(roundSchema).max(3).optional(),previousReport:savedReportSchema.nullable().optional(),rounds:z.array(roundSchema).min(1).max(3),cursor:z.number().int().min(0).max(6),roundIndex:z.number().int().min(0).max(2),consent:z.boolean(),screen:z.enum(['home','interview','report']),report:savedReportSchema.nullable(),updatedAt:z.string()});
 export type SavedSession=z.infer<typeof savedSchema>;

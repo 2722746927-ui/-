@@ -1,6 +1,7 @@
+import {isLegacyInterview,upgradeInterview} from '../src/lib/interview-upgrade';
 import { describe,it,expect,vi } from 'vitest';
 import { reportSchema,savedReportSchema } from '../src/lib/schema';
-import { generate,validateFollowupFocus,validateEvidence } from '../src/lib/server';
+import { generate,validateFollowupFocus,validateEvidence,transcript } from '../src/lib/server';
 import { SYSTEM_PROMPT,REPORT_FORMAT,followupInstruction } from '../src/lib/prompts';
 import { PLANNING_STAGES } from '../src/lib/workflow';
 import { blankSession,loadSession,encodeBackup,decodeBackup } from '../src/lib/session';
@@ -17,4 +18,23 @@ describe('three collection rounds and four planning stages',()=>{
  it('does not accept ungrounded motivation hypotheses or missing action links',()=>{const a=report();a.motivation.actionLinks[0].evidence=[];expect(reportSchema.safeParse(a).success).toBe(false);const b=report();b.motivation.actionLinks.pop();expect(reportSchema.safeParse(b).success).toBe(false);});
  it('supports unknown future goals without forcing a fabricated ideal life',async()=>{const data=interview();for(const round of data.rounds)for(const answer of round.answers)if(answer.questionId!=='stage')answer.value='不知道，未来方向还不明确';const r=report();r.profile.findings=[{statement:'当前为大学生或研究生',kind:'fact',evidence:['r1.stage']},{statement:'兴趣尚不明确',kind:'unknown',evidence:[]},{statement:'未来生活期待尚待探索',kind:'unknown',evidence:[]}];r.vision.life='尚未明确，先探索愿意保留或改变的生活状态';r.vision.goals=['通过低成本经历形成更可靠的生活偏好线索'];for(const link of r.motivation.actionLinks){link.kind='unknown';link.desiredLife='尚未明确，行动用于探索而非证明既定人生目标';link.longTermGoal='先澄清自己的生活选择标准';link.evidence=[];}const f=vi.fn<typeof fetch>().mockResolvedValue(response(r));const result=await generate('report',data,config,f);expect(result).toMatchObject({reportVersion:2,vision:{life:expect.stringContaining('尚未明确')},motivation:{actionLinks:expect.arrayContaining([expect.objectContaining({kind:'unknown'})])}});expect(JSON.parse(f.mock.calls[0][1]!.body as string).messages[0].content).toContain('不强行编造理想');});
  it('keeps old reports and backup data readable without fabricating a fourth stage',()=>{const{reportVersion,motivation,...old}=report();const saved={...blankSession(),rounds:interview().rounds,screen:'report' as const,report:old};const restored=loadSession(JSON.stringify(saved));expect(restored?.report?.profile).toEqual(old.profile);expect(restored?.report?.motivation).toBeUndefined();const backup=decodeBackup(encodeBackup(saved));expect(backup.report?.directions).toEqual(old.directions);expect(backup.report?.motivation).toBeUndefined();expect(backup.consent).toBe(false);});
+});
+
+
+describe('preserving an old questionnaire while switching workflows',()=>{
+ it('keeps matching answers and archives the old future question and report',()=>{
+  const old=blankSession();delete old.workflowVersion;old.screen='interview';old.report=report();
+  old.rounds[0].questions=old.rounds[0].questions.map(q=>q.id==='strengths'?{...q,id:'future',title:'旧版未来问题'}:q);
+  old.rounds[0].answers=old.rounds[0].questions.map(q=>({questionId:q.id,value:`原文 ${q.id}`,skipped:false}));
+  const snapshot=structuredClone(old);const next=upgradeInterview(old);
+  expect(next.workflowVersion).toBe(2);expect(next.rounds[0].questions[next.cursor].id).toBe('strengths');
+  expect(next.rounds[0].answers).toHaveLength(5);expect(next.previousRounds).toEqual(old.rounds);expect(next.previousReport).toEqual(old.report);expect(next.report).toBeNull();expect(old).toEqual(snapshot);
+  const restored=decodeBackup(encodeBackup(next));expect(restored.previousRounds).toEqual(old.rounds);expect(restored.previousReport).toEqual(old.report);
+ });
+ it('leaves current sessions alone',()=>{const current=blankSession();expect(isLegacyInterview(current)).toBe(false);expect(upgradeInterview(current)).toBe(current);});
+ it('passes archived evidence with distinct references and rejects invented references',()=>{
+  const data={...interview(),previousRounds:interview().rounds};data.previousRounds[0].answers[0].value='此前回答';
+  const rows=transcript(data);expect(rows[0].source).toBe('previous');expect(rows[0].answers[0].ref).toBe('previous.r1.stage');expect(rows.at(-1)?.source).toBe('current');
+  const r=report();r.motivation.actionLinks[0].evidence=['previous.r1.stage'];expect(()=>validateEvidence(r,data)).not.toThrow();r.motivation.actionLinks[0].evidence=['previous.r1.fake'];expect(()=>validateEvidence(r,data)).toThrow();
+ });
 });

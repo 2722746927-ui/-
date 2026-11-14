@@ -4,10 +4,14 @@ import { requestSchema, followupSchema, reportSchema, type Interview } from './s
 import { SYSTEM_PROMPT, followupInstruction, REPORT_FORMAT } from './prompts';
 export type Config={DEEPSEEK_API_KEY?:string;DEEPSEEK_MODEL?:string;DEEPSEEK_BASE_URL?:string};
 class PlannerError extends Error {constructor(public status:number,public code:string,message:string){super(message);}}
-export function transcript(interview:Interview){return interview.rounds.map(r=>({round:r.round,answers:r.questions.map(q=>{const a=r.answers.find(x=>x.questionId===q.id);return{ref:`r${r.round}.${q.id}`,question:q.title,answer:a?.skipped?'[用户跳过]':a?.value??'[未回答]',skipped:!a||a.skipped};})}));}
+export function transcript(interview:Interview){
+ const rows=(rounds:Interview['rounds'],previous:boolean)=>rounds.map(r=>({round:r.round,source:previous?'previous':'current',answers:r.questions.map(q=>{const a=r.answers.find(x=>x.questionId===q.id);return{ref:`${previous?'previous.':''}r${r.round}.${q.id}`,question:q.title,answer:a?.skipped?'[用户跳过]':a?.value??'[未回答]',skipped:!a||a.skipped};})}));
+ return[...rows(interview.previousRounds||[],true),...rows(interview.rounds,false)];
+}
+
 export function validateEvidence(data:unknown, interview:Interview){
   const report=reportSchema.parse(data);
-  const refs=new Set(interview.rounds.flatMap(r=>r.answers.filter(a=>!a.skipped&&a.value.trim()).map(a=>`r${r.round}.${a.questionId}`)));
+  const refs=new Set(transcript(interview).flatMap(r=>r.answers.filter(a=>!a.skipped&&a.answer.trim()).map(a=>a.ref)));
   for(const item of [...report.profile.findings,...report.directions,...report.motivation.actionLinks]){
     if(('kind' in item&&item.kind==='fact')||!('kind' in item)) {if(!item.evidence.length)throw new Error('结论缺少证据');}
     for(const ref of item.evidence)if(!refs.has(ref))throw new Error('证据编号无效');

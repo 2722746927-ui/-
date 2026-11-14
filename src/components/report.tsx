@@ -5,9 +5,10 @@ import type { SavedReport,Round } from '@/lib/schema';
 import { PLANNING_STAGES as chapters } from '@/lib/workflow';
 function List({items}:{items:string[]}){return <ul className="report-list">{items.map((x,i)=><li key={i}>{x}</li>)}</ul>}
 const kinds={fact:'用户明确提供',hypothesis:'合理推断 · 待验证',unknown:'信息不足 · 待探索'};
-export default function ReportView({report:r,rounds,onBack,onReview,example=false}:{report:SavedReport;rounds:Round[];onBack:()=>void;onReview?:()=>void;example?:boolean}){
+export default function ReportView({report:r,rounds,previousRounds=[],onBack,onReview,example=false}:{report:SavedReport;rounds:Round[];previousRounds?:Round[];onBack:()=>void;onReview?:()=>void;example?:boolean}){
  const [showEvidence,setShowEvidence]=useState(false);const [exportError,setExportError]=useState('');const [exporting,setExporting]=useState(false);
- const refs=new Map<string,{question:string;answer:string}>(rounds.flatMap(round=>round.questions.map(q=>[`r${round.round}.${q.id}`,{question:q.title,answer:round.answers.find(a=>a.questionId===q.id)?.value||'未提供'}] as const)));
+ const refs=new Map<string,{question:string;answer:string}>(previousRounds.flatMap(round=>round.questions.map(q=>[`previous.r${round.round}.${q.id}`,{question:`此前 · ${q.title}`,answer:round.answers.find(a=>a.questionId===q.id)?.value||'未提供'}] as const)));
+ for(const [ref,value] of new Map<string,{question:string;answer:string}>(rounds.flatMap(round=>round.questions.map(q=>[`r${round.round}.${q.id}`,{question:q.title,answer:round.answers.find(a=>a.questionId===q.id)?.value||'未提供'}] as const))))refs.set(ref,value);
  function evidence(ids:string[]){return showEvidence&&ids.length>0?<div className="evidence">{ids.map(id=><p key={id}><strong>依据 · {refs.get(id)?.question||id}</strong><br/>{refs.get(id)?.answer||'待核实'}</p>)}</div>:null;}
  async function exportPDF(){setExporting(true);setExportError('');try{const{downloadReport}=await import('@/lib/pdf');await downloadReport(r,example);}catch{setExportError('PDF 文件生成失败，可以使用“打印 / 另存 PDF”保存完整报告。');}finally{setExporting(false);}}
  const motivation=r.reportVersion===2?r.motivation:null;

@@ -161,3 +161,7 @@ Cloudflare Workers / workerd 不支持 Fetch 的 `redirect: "error"`。所有服
 主要修改：`workflow.ts`、`questions.ts`、`prompts.ts`、`schema.ts`、`server.ts`、`session.ts`、`planner.tsx`、`report.tsx`、`pdf.ts`，以及对应演示、示例与测试。DeepSeek模型发现、真实最小调用验证、密钥加密存储和所有者权限逻辑保持不变。
 
 若本机安装了 Poppler 的 `pdftotext`，PDF测试还会提取中文并验证四阶段顺序及行动意义；未安装时仅跳过文本提取检查，其余PDF和交互测试照常执行。
+
+### 正在填写的旧问卷升级
+
+页面顶部显示“四阶段规划新版已上线”。浏览器恢复旧问卷时不会擅自替换已生成的问题；用户可点击“保留回答，切换新版问卷”。相同基础题沿用原回答，只补缺少的问题，并重新生成后续轮次。旧题目、回答及旧报告保留在本地备份和“回看回答”中。历史问答以 `previous.rN.questionId` 提供给 AI 作为背景，新回答优先；报告证据支持追溯历史原文。清除本次数据会同时清除这些本机记录。
