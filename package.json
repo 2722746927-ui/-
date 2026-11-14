@@ -9,7 +9,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/planner.test.ts tests/pdf.test.ts tests/ui.test.tsx tests/enhancements.test.ts tests/key-settings.test.ts tests/settings-ui.test.tsx tests/deepseek-http.test.ts tests/planning-logic.test.ts",
     "build:sites": "node scripts/build-sites.mjs",
-    "test:deployment": "vitest run tests/worker.test.ts"
+    "test:deployment": "vitest run tests/worker.test.ts",
+    "build:edgeone": "edgeone makers build && node scripts/verify-edgeone-build.mjs",
+    "test:edgeone": "vitest run tests/edgeone.test.ts",
+    "test:edgeone:runtime": "node scripts/smoke-edgeone.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
@@ -21,12 +24,14 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@edgeone/opennextjs-pages": "0.2.10-beta.13",
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "edgeone": "1.7.2",
     "esbuild": "^0.27.0",
     "jsdom": "^31.0.1",
     "tailwindcss": "^4.1.0",

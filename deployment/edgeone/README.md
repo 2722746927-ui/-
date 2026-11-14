@@ -1,3 +1,7 @@
+# 已完成本地全栈构建适配
+
+最新构建设置和验证结果请以 [EdgeOne 部署说明](../../docs/edgeone-deployment.md) 与仓库根目录 `edgeone.json` 为准。下方为初始迁移准备记录，不代表已经在腾讯云上线。
+
 # 腾讯云 EdgeOne 独立部署准备
 
 源分支：`migration/edgeone`。原站基准提交：`1a425cea7fa6ef5f45593e3e05b9af1ef6ce4e04`。

@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": ".next",
+  "nodeVersion": "22.11.0",
+  "plugins": ["@edgeone/opennextjs-pages"],
+  "cloudFunctions": {
+    "nodejs": { "maxDuration": 120 }
+  }
+}

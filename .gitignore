@@ -8,3 +8,8 @@ work/
 *.tsbuildinfo
 coverage/
 .DS_Store
+
+# EdgeOne generated artifacts and local login state (never commit credentials)
+.edgeone/
+next.config.original.*
+tsconfig.json.backup.json

@@ -165,3 +165,9 @@ Cloudflare Workers / workerd 不支持 Fetch 的 `redirect: "error"`。所有服
 ### 正在填写的旧问卷升级
 
 页面顶部显示“四阶段规划新版已上线”。浏览器恢复旧问卷时不会擅自替换已生成的问题；用户可点击“保留回答，切换新版问卷”。相同基础题沿用原回答，只补缺少的问题，并重新生成后续轮次。旧题目、回答及旧报告保留在本地备份和“回看回答”中。历史问答以 `previous.rN.questionId` 提供给 AI 作为背景，新回答优先；报告证据支持追溯历史原文。清除本次数据会同时清除这些本机记录。
+
+## 腾讯云 EdgeOne Makers（Next.js 16 全栈）
+
+使用仓库根目录 `edgeone.json` 和固定的官方 OpenNext 适配器。控制台选择 Next 全栈预设、Node 22、安装 `npm ci`、构建 `npm run build`、输出 `.next`。服务端运行时填写 `DEEPSEEK_API_KEY`，不能加 `NEXT_PUBLIC_` 前缀。
+
+本地完整平台构建：`npm run build:edgeone`；产物运行时测试：`npm run test:edgeone:runtime`（虚构数据、模拟模型，无真实额度消耗）。这两个命令不代替控制台的 `npm run build`。完整诊断、配置、密钥管理差异和剩余验收见 [EdgeOne 部署说明](docs/edgeone-deployment.md)。原 Sites 构建入口保留。
