@@ -41,8 +41,32 @@ export async function fetchDeepSeekJSON(url:string,init:RequestInit,timeoutMs:nu
   }
  }catch(error){if(error instanceof DeepSeekError)throw error;throw connectionFailure(error,timeoutMs);}finally{clearTimeout(timer);}
 }
-export async function verifyDeepSeekKey(key:string,model:string,fetcher:typeof fetch=fetch){
- const data=await fetchDeepSeekJSON('https://api.deepseek.com/models',{method:'GET',headers:{Authorization:`Bearer ${key}`,Accept:'application/json'}},30000,fetcher) as {data?:{id?:string}[]}|null;
- if(!data||!Array.isArray(data.data))throw new DeepSeekError(502,'DEEPSEEK_INVALID_MODELS','DeepSeek 返回的模型列表格式不正确（HTTP 200），无法确认模型权限，未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'INVALID_MODEL_LIST'});
- if(!data.data.some(m=>m?.id===model))throw new DeepSeekError(422,'MODEL_UNAVAILABLE','密钥可以连接 DeepSeek，但没有返回网站需要的模型权限，未更改现有配置。',{stage:'validate',upstreamStatus:200,reason:'MODEL_NOT_LISTED'});
+export const DEFAULT_DEEPSEEK_MODEL='deepseek-flash';
+export function deepSeekChatBody(model:string,messages:unknown[],maxTokens:number){
+ return{model,messages,thinking:{type:'disabled'},response_format:{type:'json_object'},max_tokens:maxTokens,temperature:0.45,stream:false};
+}
+type ModelEntry={id?:unknown;input_modalities?:unknown;output_modalities?:unknown};
+export function selectDeepSeekModel(data:unknown,preferred?:string):string{
+ const list=data as {data?:unknown}|null;
+ if(!list||!Array.isArray(list.data))throw new DeepSeekError(502,'DEEPSEEK_INVALID_MODELS','DeepSeek 返回的模型列表格式不正确（HTTP 200），无法确认模型权限，未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'INVALID_MODEL_LIST'});
+ const models=list.data.filter((entry:unknown):entry is ModelEntry=>entry!==null&&typeof entry==='object').filter(entry=>typeof entry.id==='string'&&/^deepseek-[A-Za-z0-9_.-]{1,100}$/.test(entry.id)&&(!Array.isArray(entry.input_modalities)||entry.input_modalities.includes('text'))&&(!Array.isArray(entry.output_modalities)||entry.output_modalities.includes('text'))).map(entry=>entry.id as string);
+ if(models.includes(DEFAULT_DEEPSEEK_MODEL))return DEFAULT_DEEPSEEK_MODEL;
+ if(preferred&&models.includes(preferred))return preferred;
+ if(models.includes('deepseek-v4-pro'))return 'deepseek-v4-pro';
+ if(models.length)return models.slice().sort()[0];
+ throw new DeepSeekError(422,'MODEL_UNAVAILABLE','DeepSeek 已返回模型列表，但列表中没有可用于文本对话的模型。未进行调用，也未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'NO_COMPATIBLE_MODELS'});
+}
+export type VerifiedDeepSeek={model:string;validatedAt:string};
+export async function verifyDeepSeekKey(key:string,preferredModel:string|undefined,fetcher:typeof fetch=fetch):Promise<VerifiedDeepSeek>{
+ const headers={Authorization:`Bearer ${key}`,Accept:'application/json'};
+ const list=await fetchDeepSeekJSON('https://api.deepseek.com/models',{method:'GET',headers},30000,fetcher);
+ const model=selectDeepSeekModel(list,preferredModel);
+ // A listed model alone is insufficient: perform exactly one tiny real call,
+ // with the same non-thinking JSON profile used for interviews and reports.
+ const result=await fetchDeepSeekJSON('https://api.deepseek.com/chat/completions',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(deepSeekChatBody(model,[{role:'system',content:'Return only a JSON object.'},{role:'user',content:'Return exactly {"ok":true} as JSON.'}],32))},30000,fetcher) as {choices?:{finish_reason?:string;message?:{content?:unknown}}[]}|null;
+ const choice=result?.choices?.[0];const content=choice?.message?.content;
+ if(choice?.finish_reason!=='stop'||typeof content!=='string'||!content.trim())throw new DeepSeekError(502,'MODEL_PROBE_INCOMPLETE','模型列表获取成功，但真实模型调用未返回完整的最终回答，未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'INCOMPLETE_MODEL_PROBE'});
+ let json;try{json=JSON.parse(content);}catch{throw new DeepSeekError(502,'MODEL_PROBE_INVALID','真实模型调用返回了无效 JSON，尚不能确认网站所需的结构化输出能力，未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'INVALID_PROBE_JSON'});}
+ if(json?.ok!==true)throw new DeepSeekError(502,'MODEL_PROBE_INVALID','模型未通过最小调用验证，未保存密钥。',{stage:'validate',upstreamStatus:200,reason:'PROBE_NOT_CONFIRMED'});
+ return{model,validatedAt:new Date().toISOString()};
 }

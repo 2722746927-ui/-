@@ -30,7 +30,7 @@ npm run dev
 | 名称 | 用途 |
 | --- | --- |
 | `DEEPSEEK_API_KEY` | 必需，DeepSeek API 密钥 |
-| `DEEPSEEK_MODEL` | 可选，默认 `deepseek-chat` |
+| `DEEPSEEK_MODEL` | 可选，默认 `deepseek-flash` |
 | `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com`，不带末尾斜杠 |
 
 未配置密钥时，首页会显示准备中，第一轮可以填写；服务端返回明确的未配置提示，不会生成虚构规划。
@@ -104,7 +104,7 @@ PDF 支持字体覆盖内的中文、拉丁字母和常用符号；不支持的�
 
 ## DeepSeek 网站所有者配置入口（Sites 部署）
 
-访问 `/admin/deepseek`，通过平台提供的 ChatGPT 登录确认身份后，只需填写 DeepSeek API Key，点击“保存并连接 DeepSeek”。服务端会使用固定的官方 `/models` 接口验证访问权限，随后以 AES-256-GCM 加密保存到私有 R2 绑定 `CONFIG_BUCKET`，立即供公开规划接口使用，无需重新部署。
+访问 `/admin/deepseek`，通过平台提供的 ChatGPT 登录确认身份后，只需填写 DeepSeek API Key，点击“保存并连接 DeepSeek”。服务端会使用官方 `/models` 获取实际模型列表，优先选择 `deepseek-flash`，再用一次极小的真实 JSON 模型调用验证可用性，随后以 AES-256-GCM 加密保存到私有 R2 绑定 `CONFIG_BUCKET`，立即供公开规划接口使用，无需重新部署。
 
 - 首次配置身份只允许 `PLANNER_OWNER_EMAIL` 对应的平台已验证账号；首次成功保存后记录站点专属用户 ID，后续操作只接受该 ID。
 - `PLANNER_OWNER_EMAIL` 与随机 256 位 `PLANNER_SECRET_KEY` 通过 Sites 原生服务端 secret 设置，不进入 Git、前端或浏览器存储。不要删除或轮换加密根密钥，否则无法解密已保存的 API Key；需要轮换时须安排重新录入或迁移。
@@ -114,7 +114,7 @@ PDF 支持字体覆盖内的中文、拉丁字母和常用符号；不支持的�
 - R2 缺失、加密设置缺失、密文被篡改时拒绝保存/读取，不使用不持久的内存保存冒充成功。
 - 原生 Next.js/Vercel 的 `DEEPSEEK_API_KEY` 环境变量模式保留；此浏览器管理入口的持久保存需要 Sites 提供的 R2 与身份注入，不能直接搬到没有这些绑定的平台。
 
-连接验证检查身份和模型访问，不消耗规划生成调用；真实访谈的费用、余额和生成质量仍需通过实际调用验证。
+连接验证包含一次 32 token 输出上限的小型真实模型调用，可能产生少量 API 费用；真实访谈的内容质量仍需通过实际体验验证。
 
 ## DeepSeek 连接故障修复与诊断
 
@@ -123,3 +123,16 @@ Cloudflare Workers / workerd 不支持 Fetch 的 `redirect: "error"`。所有服
 设置页会显示脱敏的错误编号、失败阶段、网站 HTTP 状态和（实际收到时的）DeepSeek HTTP 状态。分别处理 DNS、TLS、连接拒绝/重置、超时、401 鉴权、402 余额、403 权限、404 接口、429 限流、5xx 网关、HTML/损坏 JSON、模型权限与存储写入错误。未知网络错误只说明“尚未收到有效响应”，不猜测密钥有效性。
 
 不返回或记录提供商的原始响应体、请求 Authorization、API Key、异常堆栈或包含凭据的错误文本。诊断信息只由固定枚举与数字状态组成。验证通过才尝试加密写入；验证失败保留旧配置。临时防跨站令牌过期时仅刷新令牌并重试一次，普通连接/保存故障不自动重复提交。
+
+## 动态选择并验证当前 DeepSeek 模型
+
+密钥保存流程不再要求旧 ID `deepseek-chat` / `deepseek-reasoner` 必须存在。服务端先读取实际 `/models` 列表，优先选择 `deepseek-flash`；若没有 Flash，则在列表内选择已配置且支持文本的模型、`deepseek-v4-pro` 或其他实际返回的文本模型，不捏造模型 ID。
+
+随后仅执行一次最小真实 `/chat/completions` 调用，关闭 thinking、启用 JSON 输出、限制 `max_tokens: 32`，要求完整返回 `{"ok":true}`。HTTP 200、仅有模型列表、空最终内容、截断、无效 JSON、拒绝请求或账户余额问题，都不能算验证成功，也不会保存新密钥。
+
+验证成功后，将 API Key、通过验证的模型 ID 和验证时间一起加密保存。模型 ID 可在所有者设置页查看，但 API Key 不返回。追问与报告读取这个已验证模型，优先级高于可能过时的环境变量；所有真实生成使用与验证相同的非思考 JSON 配置。兼容读取过去的加密密钥记录，新的默认模型为 `deepseek-flash`。
+
+官方参考：
+- https://api-docs.deepseek.com/api/list-models/
+- https://api-docs.deepseek.com/api/create-chat-completion/
+- https://api-docs.deepseek.com/guides/thinking_mode/

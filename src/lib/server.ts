@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DeepSeekError,fetchDeepSeekJSON } from './deepseek-http';
+import { DeepSeekError,fetchDeepSeekJSON,deepSeekChatBody,DEFAULT_DEEPSEEK_MODEL } from './deepseek-http';
 import { requestSchema, followupSchema, reportSchema, type Interview } from './schema';
 import { SYSTEM_PROMPT, FOLLOWUP_FORMAT, REPORT_FORMAT } from './prompts';
 export type Config={DEEPSEEK_API_KEY?:string;DEEPSEEK_MODEL?:string;DEEPSEEK_BASE_URL?:string};
@@ -16,7 +16,7 @@ export function validateEvidence(data:unknown, interview:Interview){
 }
 async function modelCall(config:Config,messages:unknown[],fetcher:typeof fetch){
   try{
-    const envelope=await fetchDeepSeekJSON(`${(config.DEEPSEEK_BASE_URL||'https://api.deepseek.com').replace(/\/+$/,'')}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.DEEPSEEK_API_KEY}`},body:JSON.stringify({model:config.DEEPSEEK_MODEL||'deepseek-chat',messages,response_format:{type:'json_object'},temperature:0.45,max_tokens:7800,stream:false})},115_000,fetcher) as {choices?:{finish_reason?:string;message?:{content?:string}}[]};
+    const envelope=await fetchDeepSeekJSON(`${(config.DEEPSEEK_BASE_URL||'https://api.deepseek.com').replace(/\/+$/,'')}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.DEEPSEEK_API_KEY}`},body:JSON.stringify(deepSeekChatBody(config.DEEPSEEK_MODEL||DEFAULT_DEEPSEEK_MODEL,messages,7800))},115_000,fetcher) as {choices?:{finish_reason?:string;message?:{content?:string}}[]};
     if(envelope?.choices?.[0]?.finish_reason==='length')throw new Error('输出未完整生成');
     const content=envelope?.choices?.[0]?.message?.content;
     if(typeof content!=='string')throw new Error('AI 未返回有效内容');

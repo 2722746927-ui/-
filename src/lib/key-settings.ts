@@ -1,6 +1,6 @@
 /** Server-only secret configuration. Never import this module into client code. */
 import type { Config } from './server';
-import { DeepSeekError,verifyDeepSeekKey } from './deepseek-http';
+import { DeepSeekError,verifyDeepSeekKey,DEFAULT_DEEPSEEK_MODEL,type VerifiedDeepSeek } from './deepseek-http';
 export type SecretBucket={get:(key:string)=>Promise<{text:()=>Promise<string>}|null>;put:(key:string,value:string,options?:unknown)=>Promise<unknown>};
 export type SettingsEnv=Config&{CONFIG_BUCKET?:SecretBucket;PLANNER_SECRET_KEY?:string;PLANNER_OWNER_EMAIL?:string};
 const OBJECT_KEY='private/deepseek-credential-v1.json';
@@ -22,19 +22,27 @@ async function readRecord(env:SettingsEnv):Promise<EncryptedRecord|null>{
  if(r?.version!==1||typeof r.ownerId!=='string'||typeof r.iv!=='string'||typeof r.ciphertext!=='string'||typeof r.updatedAt!=='string')throw new Error('Invalid encrypted record');
  return r;
 }
-export async function encryptCredential(key:string,ownerId:string,env:SettingsEnv):Promise<EncryptedRecord>{
+export async function encryptCredential(key:string,ownerId:string,env:SettingsEnv,verified?:VerifiedDeepSeek):Promise<EncryptedRecord>{
  const iv=crypto.getRandomValues(new Uint8Array(12));const secret=await cryptoKey(env,['encrypt']);
- const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder(AAD+':'+ownerId)},secret,encoder(key));
+ const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder(AAD+':'+ownerId)},secret,encoder(verified?JSON.stringify({apiKey:key,...verified}):key));
  return{version:1,ownerId,iv:b64(iv),ciphertext:b64(new Uint8Array(encrypted)),updatedAt:new Date().toISOString()};
 }
-export async function decryptCredential(record:EncryptedRecord,env:SettingsEnv):Promise<string>{
- const key=await cryptoKey(env,['decrypt']);
- const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(record.iv),additionalData:encoder(AAD+':'+record.ownerId)},key,unb64(record.ciphertext));
- return new TextDecoder().decode(decrypted);
+type StoredConfig={apiKey:string;model?:string;validatedAt?:string};
+async function decryptConfiguration(record:EncryptedRecord,env:SettingsEnv):Promise<StoredConfig>{
+ const root=await cryptoKey(env,['decrypt']);
+ const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(record.iv),additionalData:encoder(AAD+':'+record.ownerId)},root,unb64(record.ciphertext));
+ const raw=new TextDecoder().decode(decrypted);
+ // Keep previously encrypted key-only records readable without weakening AES-GCM.
+ if(raw.startsWith('sk-'))return{apiKey:raw};
+ const data=JSON.parse(raw);
+ if(typeof data?.apiKey!=='string'||!/^deepseek-[A-Za-z0-9_.-]{1,100}$/.test(data?.model)||typeof data?.validatedAt!=='string')throw new Error('Invalid encrypted configuration');
+ return{apiKey:data.apiKey,model:data.model,validatedAt:data.validatedAt};
 }
+export async function decryptCredential(record:EncryptedRecord,env:SettingsEnv):Promise<string>{return(await decryptConfiguration(record,env)).apiKey;}
 export async function resolvePlannerConfig(env:SettingsEnv):Promise<Config>{
- if(!env.CONFIG_BUCKET)return{DEEPSEEK_API_KEY:env.DEEPSEEK_API_KEY,DEEPSEEK_MODEL:env.DEEPSEEK_MODEL,DEEPSEEK_BASE_URL:env.DEEPSEEK_BASE_URL};
- const record=await readRecord(env);return{DEEPSEEK_API_KEY:record?await decryptCredential(record,env):env.DEEPSEEK_API_KEY,DEEPSEEK_MODEL:env.DEEPSEEK_MODEL,DEEPSEEK_BASE_URL:env.DEEPSEEK_BASE_URL};
+ const record=env.CONFIG_BUCKET?await readRecord(env):null;
+ const saved=record?await decryptConfiguration(record,env):null;
+ return{DEEPSEEK_API_KEY:saved?.apiKey||env.DEEPSEEK_API_KEY,DEEPSEEK_MODEL:saved?.model||env.DEEPSEEK_MODEL||DEFAULT_DEEPSEEK_MODEL,DEEPSEEK_BASE_URL:env.DEEPSEEK_BASE_URL};
 }
 async function owner(request:Request,env:SettingsEnv,record:EncryptedRecord|null){
  // These headers are supplied and sanitized by Sites dispatch, never by a client session.
@@ -58,8 +66,8 @@ export async function handleKeySettings(request:Request,env:SettingsEnv,fetcher:
   const record=env.CONFIG_BUCKET?await readRecord(env):null;
   const id=await owner(request,env,record);requireStorage(env);
   if(request.method==='GET'){
-   await cryptoKey(env,['decrypt']);if(record)await decryptCredential(record,env);
-   return json({configured:Boolean(record||env.DEEPSEEK_API_KEY),updatedAt:record?.updatedAt||null,csrfToken:await csrfToken(id,env)});
+   await cryptoKey(env,['decrypt']);const saved=record?await decryptConfiguration(record,env):null;
+   return json({configured:Boolean(record||env.DEEPSEEK_API_KEY),model:saved?.model||null,validatedAt:saved?.validatedAt||null,updatedAt:record?.updatedAt||null,csrfToken:await csrfToken(id,env)});
   }
   if(request.method!=='POST')return json({error:'不支持的请求方法。'},405);
   if(request.headers.get('origin')!==new URL(request.url).origin)throw new SettingsError(403,'ORIGIN','请求来源校验失败，请从网站设置页面重试。');
@@ -70,9 +78,9 @@ export async function handleKeySettings(request:Request,env:SettingsEnv,fetcher:
   let data;try{data=JSON.parse(raw);}catch{throw new SettingsError(400,'FORMAT','请求格式不正确。');}
   const key=typeof data?.apiKey==='string'?data.apiKey.trim():'';
   if(!/^sk-[A-Za-z0-9_-]{16,256}$/.test(key))throw new SettingsError(400,'KEY_FORMAT','请粘贴以 sk- 开头的完整 DeepSeek API Key，不要填写网址或变量名。');
-  await verifyDeepSeekKey(key,env.DEEPSEEK_MODEL||'deepseek-chat',fetcher);
-  let encrypted:EncryptedRecord;try{encrypted=await encryptCredential(key,id,env);}catch(error){if(error instanceof SettingsError)throw error;throw new SettingsError(503,'ENCRYPTION_FAILED','DeepSeek 连接验证已通过，但服务端加密失败，未保存密钥。请联系网站维护者检查加密配置。');}
+  const verified=await verifyDeepSeekKey(key,env.DEEPSEEK_MODEL,fetcher);
+  let encrypted:EncryptedRecord;try{encrypted=await encryptCredential(key,id,env,verified);}catch(error){if(error instanceof SettingsError)throw error;throw new SettingsError(503,'ENCRYPTION_FAILED','DeepSeek 连接验证已通过，但服务端加密失败，未保存密钥。请联系网站维护者检查加密配置。');}
   try{await requireStorage(env).put(OBJECT_KEY,JSON.stringify(encrypted),{httpMetadata:{contentType:'application/json'}});}catch{throw new SettingsError(503,'STORAGE_WRITE_FAILED','DeepSeek 连接验证已通过，但安全存储写入失败。保存结果尚未确认，请刷新检查状态；不要把密钥发到聊天中。');}
-  return json({configured:true,updatedAt:encrypted.updatedAt,message:'密钥已加密保存，DeepSeek 连接验证通过，网站已生效。'});
+  return json({configured:true,model:verified.model,validatedAt:verified.validatedAt,updatedAt:encrypted.updatedAt,message:`密钥已加密保存，${verified.model} 已通过真实调用验证，网站已生效。`});
  }catch(error){if(error instanceof DeepSeekError)return json({error:error.message+' 本次未保存或替换密钥。',code:error.code,diagnostic:error.diagnostic},error.status);if(error instanceof SettingsError)return json({error:error.message,code:error.code,...(error.status===401?{setupReady:Boolean(env.CONFIG_BUCKET&&typeof env.CONFIG_BUCKET.get==='function'&&env.PLANNER_SECRET_KEY&&env.PLANNER_OWNER_EMAIL)}:{})},error.status);return json({error:'安全设置暂时不可用，未返回任何密钥内容，请稍后重试。',code:'SETTINGS_UNAVAILABLE'},503);}
 }
