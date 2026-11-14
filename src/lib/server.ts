@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DeepSeekError,fetchDeepSeekJSON } from './deepseek-http';
 import { requestSchema, followupSchema, reportSchema, type Interview } from './schema';
 import { SYSTEM_PROMPT, FOLLOWUP_FORMAT, REPORT_FORMAT } from './prompts';
 export type Config={DEEPSEEK_API_KEY?:string;DEEPSEEK_MODEL?:string;DEEPSEEK_BASE_URL?:string};
@@ -14,17 +15,15 @@ export function validateEvidence(data:unknown, interview:Interview){
   return report;
 }
 async function modelCall(config:Config,messages:unknown[],fetcher:typeof fetch){
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),115_000);
   try{
-    const response=await fetcher(`${(config.DEEPSEEK_BASE_URL||'https://api.deepseek.com').replace(/\/+$/,'')}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.DEEPSEEK_API_KEY}`},body:JSON.stringify({model:config.DEEPSEEK_MODEL||'deepseek-chat',messages,response_format:{type:'json_object'},temperature:0.45,max_tokens:7800,stream:false}),signal:controller.signal});
-    if(!response.ok){if(response.status===401||response.status===403)throw new PlannerError(503,'PROVIDER_AUTH','AI 服务的密钥或权限配置有误，请联系网站维护者。');if(response.status===429)throw new PlannerError(429,'PROVIDER_BUSY','AI 服务暂时繁忙，请稍后重试，回答已保存在本机。');throw new PlannerError(502,'PROVIDER_ERROR','AI 服务暂时不可用，请稍后重试。');}
-    const envelope=await response.json();
-    if(envelope.choices?.[0]?.finish_reason==='length')throw new Error('输出未完整生成');
-    const content=envelope.choices?.[0]?.message?.content;
+    const envelope=await fetchDeepSeekJSON(`${(config.DEEPSEEK_BASE_URL||'https://api.deepseek.com').replace(/\/+$/,'')}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.DEEPSEEK_API_KEY}`},body:JSON.stringify({model:config.DEEPSEEK_MODEL||'deepseek-chat',messages,response_format:{type:'json_object'},temperature:0.45,max_tokens:7800,stream:false})},115_000,fetcher) as {choices?:{finish_reason?:string;message?:{content?:string}}[]};
+    if(envelope?.choices?.[0]?.finish_reason==='length')throw new Error('输出未完整生成');
+    const content=envelope?.choices?.[0]?.message?.content;
     if(typeof content!=='string')throw new Error('AI 未返回有效内容');
     return content;
-  } catch(e){if(e instanceof Error&&e.name==='AbortError')throw new PlannerError(504,'TIMEOUT','本次分析超时。你的回答已保留，请重试。');throw e;}finally{clearTimeout(timer);}
+  }catch(error){if(error instanceof DeepSeekError)throw new PlannerError(error.code==='PROVIDER_BUSY'?429:error.status,error.code,error.message);throw error;}
 }
+
 export async function generate(action:'followup'|'report',interview:Interview,config:Config,fetcher:typeof fetch=fetch){
   if(!config.DEEPSEEK_API_KEY)throw new PlannerError(503,'NOT_CONFIGURED','网站尚未配置 AI 服务，请联系维护者；你的回答会保留在本机。');
   const rounds=interview.rounds;

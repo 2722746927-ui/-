@@ -1,5 +1,6 @@
 /** Server-only secret configuration. Never import this module into client code. */
 import type { Config } from './server';
+import { DeepSeekError,verifyDeepSeekKey } from './deepseek-http';
 export type SecretBucket={get:(key:string)=>Promise<{text:()=>Promise<string>}|null>;put:(key:string,value:string,options?:unknown)=>Promise<unknown>};
 export type SettingsEnv=Config&{CONFIG_BUCKET?:SecretBucket;PLANNER_SECRET_KEY?:string;PLANNER_OWNER_EMAIL?:string};
 const OBJECT_KEY='private/deepseek-credential-v1.json';
@@ -69,16 +70,9 @@ export async function handleKeySettings(request:Request,env:SettingsEnv,fetcher:
   let data;try{data=JSON.parse(raw);}catch{throw new SettingsError(400,'FORMAT','请求格式不正确。');}
   const key=typeof data?.apiKey==='string'?data.apiKey.trim():'';
   if(!/^sk-[A-Za-z0-9_-]{16,256}$/.test(key))throw new SettingsError(400,'KEY_FORMAT','请粘贴以 sk- 开头的完整 DeepSeek API Key，不要填写网址或变量名。');
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);
-  try{
-   // Fixed endpoint and no redirect: never send a credential to a caller-selected host.
-   const result=await fetcher('https://api.deepseek.com/models',{method:'GET',headers:{Authorization:`Bearer ${key}`,Accept:'application/json'},redirect:'error',signal:controller.signal});
-   if(result.status===401||result.status===403)throw new SettingsError(422,'KEY_REJECTED','DeepSeek 未接受这个密钥。请检查是否复制完整，或在 DeepSeek 后台确认密钥是否有效。');
-   if(result.status===429)throw new SettingsError(503,'PROVIDER_BUSY','DeepSeek 暂时繁忙，未更改现有配置，请稍后重试。');
-   if(!result.ok)throw new SettingsError(502,'PROVIDER_ERROR','暂时无法连接 DeepSeek，未更改现有配置，请稍后重试。');
-   const modelList=await result.json();if(!Array.isArray(modelList?.data)||!modelList.data.some((m:{id?:string})=>m?.id===(env.DEEPSEEK_MODEL||'deepseek-chat')))throw new SettingsError(422,'MODEL_UNAVAILABLE','此密钥暂时不能访问网站所需的 DeepSeek 模型，未更改现有配置。');
-  }catch(error){if(error instanceof SettingsError)throw error;throw new SettingsError(502,'CONNECTION','连接验证未完成，未保存密钥。请稍后重试。');}finally{clearTimeout(timer);}
-  const encrypted=await encryptCredential(key,id,env);await requireStorage(env).put(OBJECT_KEY,JSON.stringify(encrypted),{httpMetadata:{contentType:'application/json'}});
+  await verifyDeepSeekKey(key,env.DEEPSEEK_MODEL||'deepseek-chat',fetcher);
+  let encrypted:EncryptedRecord;try{encrypted=await encryptCredential(key,id,env);}catch(error){if(error instanceof SettingsError)throw error;throw new SettingsError(503,'ENCRYPTION_FAILED','DeepSeek 连接验证已通过，但服务端加密失败，未保存密钥。请联系网站维护者检查加密配置。');}
+  try{await requireStorage(env).put(OBJECT_KEY,JSON.stringify(encrypted),{httpMetadata:{contentType:'application/json'}});}catch{throw new SettingsError(503,'STORAGE_WRITE_FAILED','DeepSeek 连接验证已通过，但安全存储写入失败。保存结果尚未确认，请刷新检查状态；不要把密钥发到聊天中。');}
   return json({configured:true,updatedAt:encrypted.updatedAt,message:'密钥已加密保存，DeepSeek 连接验证通过，网站已生效。'});
- }catch(error){if(error instanceof SettingsError)return json({error:error.message,code:error.code,...(error.status===401?{setupReady:Boolean(env.CONFIG_BUCKET&&typeof env.CONFIG_BUCKET.get==='function'&&env.PLANNER_SECRET_KEY&&env.PLANNER_OWNER_EMAIL)}:{})},error.status);return json({error:'安全设置暂时不可用，未返回任何密钥内容，请稍后重试。',code:'SETTINGS_UNAVAILABLE'},503);}
+ }catch(error){if(error instanceof DeepSeekError)return json({error:error.message+' 本次未保存或替换密钥。',code:error.code,diagnostic:error.diagnostic},error.status);if(error instanceof SettingsError)return json({error:error.message,code:error.code,...(error.status===401?{setupReady:Boolean(env.CONFIG_BUCKET&&typeof env.CONFIG_BUCKET.get==='function'&&env.PLANNER_SECRET_KEY&&env.PLANNER_OWNER_EMAIL)}:{})},error.status);return json({error:'安全设置暂时不可用，未返回任何密钥内容，请稍后重试。',code:'SETTINGS_UNAVAILABLE'},503);}
 }
