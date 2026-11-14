@@ -1,18 +1,20 @@
 /** Sites deployment adapter. Native Next.js API routes use the same handler. */
-import { handlePlanner, type Config } from '../src/lib/server';
+import { handlePlanner } from '../src/lib/server';
+import { handleKeySettings,resolvePlannerConfig,type SettingsEnv } from '../src/lib/key-settings';
 declare const SITE_ASSETS:Record<string,{body:string;type:string}>;
 const buckets=new Map<string,{count:number;reset:number;active:number}>();
 export default {
- async fetch(request:Request,env:Config):Promise<Response>{
+ async fetch(request:Request,env:SettingsEnv):Promise<Response>{
   const url=new URL(request.url);
-  if(url.pathname==='/api/health')return Response.json({configured:Boolean(env.DEEPSEEK_API_KEY)},{headers:{'Cache-Control':'no-store'}});
+  if(url.pathname==='/api/admin/deepseek')return handleKeySettings(request,env);
+  if(url.pathname==='/api/health'){try{const config=await resolvePlannerConfig(env);return Response.json({configured:Boolean(config.DEEPSEEK_API_KEY)},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({configured:false},{status:503,headers:{'Cache-Control':'no-store'}});}}
   if(url.pathname==='/api/planner'){
    // Cloudflare sets this header; visitors cannot override it at the platform boundary.
    const identity=request.headers.get('cf-connecting-ip')||request.headers.get('oai-authenticated-user-id')||'unknown';
    const now=Date.now();if(buckets.size>2000)for(const[k,b]of buckets)if(b.reset<now&&b.active===0)buckets.delete(k);
    let b=buckets.get(identity);if(!b||b.reset<now){b={count:0,reset:now+15*60*1000,active:0};buckets.set(identity,b);}
    if(b.count>=15||b.active>=2)return Response.json({error:'请求较频繁，请稍后再试；你的回答已保留。',code:'RATE_LIMIT'},{status:429,headers:{'Cache-Control':'no-store','Retry-After':'60'}});
-   b.count++;b.active++;try{return await handlePlanner(request,env);}finally{b.active--;}
+   b.count++;b.active++;try{const config=await resolvePlannerConfig(env);return await handlePlanner(request,config);}catch{return Response.json({error:'网站的 AI 配置暂时不可用，请稍后重试。',code:'CONFIG_UNAVAILABLE'},{status:503,headers:{'Cache-Control':'no-store'}});}finally{b.active--;}
   }
   if(request.method!=='GET'&&request.method!=='HEAD')return new Response('Method not allowed',{status:405});
   const path=url.pathname==='/'?'/index.html':url.pathname;
