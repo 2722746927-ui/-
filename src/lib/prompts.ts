@@ -28,6 +28,6 @@ export const REPORT_FORMAT = `三轮信息收集已结束。先按“认识自�
 "motivation":{"actionLinks":[{"actionIndex":0,"desiredLife":"这项行动连接的未来生活状态；若未知则明说，不能当成事实","longTermGoal":"连接的长期目标或明确的方向探索任务","personalValue":"对应用户重视的价值或待验证的价值假设","whyThisAction":"这个具体行动怎样帮助接近目标，不能只重复任务标题","priorityReason":"为什么现在值得先做及允许怎样取舍","kind":"fact 或 hypothesis 或 unknown，行动意义通常是有依据的hypothesis","evidence":["r1.values"]}],"lowMotivationStrategies":[{"trigger":"动力下降或现实受阻的具体情形","adjustment":"减少负担/调整路径的做法","minimumStep":"可选的最小行动，不强制打卡","whenToPause":"何时暂停或重新考虑目标"},{"trigger":"另一情形","adjustment":"调整","minimumStep":"小步","whenToPause":"暂停标准"}],"selfCheck":["愿意继续是否来自自己的价值？","条件或目标变化时是否应调整？"],"autonomyNote":"用户保有选择、暂停和改变方向的权利，不用焦虑恐惧羞耻推动行动"},
 "limitations":["信息边界与不保证结果"]
 }。
-网页和PDF固定按四章呈现：profile→vision与directions→priority/roadmap/actions/review→motivation。
+网页和PDF固定按四章呈现：profile→vision与directions的愿景/选择分析→priority/roadmap/actions/review及directions.firstExperiment的路径验证→motivation。为兼容旧数据保留firstExperiment字段，但其行动设计属于第三阶段，不能取代第二阶段的生活愿景。
 约束：findings 3—12项；coreNeeds 1—5，constraints 1—6；vision每个数组1—6项；directions 2—3条且各引用有效证据；roadmap恰好上述4个不同时间范围，每项milestones 1—5条；actions 3—6项、每项steps 2—6步；review.signals和changeTriggers各2—6条，questions 1—6条；limitations 1—6条。
 motivation.actionLinks必须与actions逐一对应，actionIndex从0开始，每项行动恰好关联一次。每个链接分别说明具体行动、用户价值、未来生活和长远目标的因果联系，不得复用同一段鸡汤。kind非unknown时必须引用有效回答；愿景不明确时可以unknown，目标写为探索或验证假设，不能伪造用户意愿。lowMotivationStrategies 2—5项、selfCheck 2—5项。全篇约3000—4500汉字，必要字段非空。不要强迫辞职、创业、购买课程或做高风险投入。`;
