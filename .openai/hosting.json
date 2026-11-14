@@ -1,6 +1,4 @@
 {
   "project_id": "appgprj_6af6fe0acde08191b5f869c1a48eb2e3",
-  "r2": {
-    "binding": "CONFIG_BUCKET"
-  }
+  "r2": "CONFIG_BUCKET"
 }
