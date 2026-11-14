@@ -6,7 +6,8 @@ export const questionSchema = z.object({
   hint: z.string().max(800),
   type: z.enum(['text', 'single', 'multi']),
   options: z.array(z.string().min(1).max(120)).max(10),
-  reason: z.string().max(600)
+  reason: z.string().max(600),
+  topic:z.enum(['self','future','constraints']).optional()
 }).refine(q => q.type === 'text' || q.options.length >= 2, '选择题至少需要两个选项');
 export const answerSchema = z.object({ questionId: z.string(), value: z.string().max(4000), skipped: z.boolean() });
 export const roundSchema = z.object({
@@ -35,7 +36,7 @@ export const findingSchema = z.object({
   kind: z.enum(['fact','hypothesis','unknown']),
   evidence: z.array(z.string().max(100)).max(8)
 });
-export const reportSchema = z.object({
+const reportBase = z.object({
   title: z.string().min(1).max(120),
   overview: text,
   profile: z.object({stage:text,findings:z.array(findingSchema).min(3).max(12),coreNeeds:z.array(text).min(1).max(5),constraints:z.array(text).min(1).max(6)}),
@@ -46,8 +47,26 @@ export const reportSchema = z.object({
   actions: z.array(z.object({title:text,steps:z.array(text).min(2).max(6),time:text,resources:text,outcome:text,obstacle:text})).min(3).max(6),
   review: z.object({signals:z.array(text).min(2).max(6),changeTriggers:z.array(text).min(2).max(6),nextReview:text,questions:z.array(text).min(1).max(6)}),
   limitations:z.array(text).min(1).max(6)
-}).superRefine((r,ctx)=>{if(new Set(r.roadmap.map(x=>x.horizon)).size!==4)ctx.addIssue({code:'custom',message:'阶段路径需要四个不同的时间范围'});});
-export type Report = z.infer<typeof reportSchema>;
+});
+function validateHorizons(r:{roadmap:{horizon:string}[]},ctx:z.RefinementCtx){if(new Set(r.roadmap.map(x=>x.horizon)).size!==4)ctx.addIssue({code:'custom',message:'阶段路径需要四个不同的时间范围'});}
+export const motivationSchema=z.object({
+ actionLinks:z.array(z.object({actionIndex:z.number().int().min(0).max(5),desiredLife:text,longTermGoal:text,personalValue:text,whyThisAction:text,priorityReason:text,kind:z.enum(['fact','hypothesis','unknown']),evidence:z.array(z.string().max(100)).max(8)})).min(3).max(6),
+ lowMotivationStrategies:z.array(z.object({trigger:text,adjustment:text,minimumStep:text,whenToPause:text})).min(2).max(5),
+ selfCheck:z.array(text).min(2).max(5),
+ autonomyNote:text
+});
+export const reportSchema=reportBase.extend({reportVersion:z.literal(2),motivation:motivationSchema}).superRefine((r,ctx)=>{
+ validateHorizons(r,ctx);
+ const indexes=r.motivation.actionLinks.map(x=>x.actionIndex);
+ if(indexes.length!==r.actions.length||new Set(indexes).size!==r.actions.length||indexes.some(i=>i>=r.actions.length))ctx.addIssue({code:'custom',message:'内在动力必须逐一关联全部近期行动，不得遗漏、重复或引用不存在的行动'});
+ for(const link of r.motivation.actionLinks)if(link.kind!=='unknown'&&!link.evidence.length)ctx.addIssue({code:'custom',message:'行动意义的已知依据或合理推断需引用访谈证据；愿景不明确时标为 unknown'});
+});
+// A malformed v2 report cannot silently downgrade to legacy and bypass motivation validation.
+export const legacyReportSchema=reportBase.extend({reportVersion:z.literal(1).optional(),motivation:z.never().optional()}).superRefine(validateHorizons);
+export const savedReportSchema=z.union([reportSchema,legacyReportSchema]);
+export type Report=z.infer<typeof reportSchema>;
+export type LegacyReport=z.infer<typeof legacyReportSchema>;
+export type SavedReport=z.infer<typeof savedReportSchema>;
 export const requestSchema=z.object({action:z.enum(['followup','report']),interview:interviewSchema});
-export const savedSchema=z.object({version:z.literal(1),rounds:z.array(roundSchema).min(1).max(3),cursor:z.number().int().min(0).max(6),roundIndex:z.number().int().min(0).max(2),consent:z.boolean(),screen:z.enum(['home','interview','report']),report:reportSchema.nullable(),updatedAt:z.string()});
+export const savedSchema=z.object({version:z.literal(1),workflowVersion:z.literal(2).optional(),previousRounds:z.array(roundSchema).max(3).optional(),rounds:z.array(roundSchema).min(1).max(3),cursor:z.number().int().min(0).max(6),roundIndex:z.number().int().min(0).max(2),consent:z.boolean(),screen:z.enum(['home','interview','report']),report:savedReportSchema.nullable(),updatedAt:z.string()});
 export type SavedSession=z.infer<typeof savedSchema>;
