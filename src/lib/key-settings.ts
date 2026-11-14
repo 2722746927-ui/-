@@ -80,5 +80,5 @@ export async function handleKeySettings(request:Request,env:SettingsEnv,fetcher:
   }catch(error){if(error instanceof SettingsError)throw error;throw new SettingsError(502,'CONNECTION','连接验证未完成，未保存密钥。请稍后重试。');}finally{clearTimeout(timer);}
   const encrypted=await encryptCredential(key,id,env);await requireStorage(env).put(OBJECT_KEY,JSON.stringify(encrypted),{httpMetadata:{contentType:'application/json'}});
   return json({configured:true,updatedAt:encrypted.updatedAt,message:'密钥已加密保存，DeepSeek 连接验证通过，网站已生效。'});
- }catch(error){if(error instanceof SettingsError)return json({error:error.message,code:error.code},error.status);return json({error:'安全设置暂时不可用，未返回任何密钥内容，请稍后重试。',code:'SETTINGS_UNAVAILABLE'},503);}
+ }catch(error){if(error instanceof SettingsError)return json({error:error.message,code:error.code,...(error.status===401?{setupReady:Boolean(env.CONFIG_BUCKET&&typeof env.CONFIG_BUCKET.get==='function'&&env.PLANNER_SECRET_KEY&&env.PLANNER_OWNER_EMAIL)}:{})},error.status);return json({error:'安全设置暂时不可用，未返回任何密钥内容，请稍后重试。',code:'SETTINGS_UNAVAILABLE'},503);}
 }
